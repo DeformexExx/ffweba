@@ -22,6 +22,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS devices (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    ip TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'offline',
                     ram REAL NOT NULL DEFAULT 0,
                     tcp_count INTEGER NOT NULL DEFAULT 0,
@@ -70,21 +71,28 @@ class Database:
                 )
                 """
             )
+            self._migrate(conn)
             conn.commit()
 
-    def upsert_device(self, device_id: str, name: str) -> None:
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
+        if "ip" not in cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN ip TEXT NOT NULL DEFAULT ''")
+
+    def upsert_device(self, device_id: str, name: str, ip: str = "") -> None:
         now = int(time.time())
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO devices(id, name, status, last_seen)
-                VALUES(?, ?, 'online', ?)
+                INSERT INTO devices(id, name, ip, status, last_seen)
+                VALUES(?, ?, ?, 'online', ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
+                    ip = CASE WHEN excluded.ip != '' THEN excluded.ip ELSE devices.ip END,
                     status = 'online',
                     last_seen = excluded.last_seen
                 """,
-                (device_id, name, now),
+                (device_id, name, ip, now),
             )
             conn.commit()
 
